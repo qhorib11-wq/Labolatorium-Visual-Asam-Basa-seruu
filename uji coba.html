@@ -1,0 +1,194 @@
+
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Virtual Lab Kimia</title>
+<style>
+  body { font-family: Arial, sans-serif; background: #f5f5f5; padding: 20px; }
+  .container { display: flex; justify-content: space-between; gap: 20px; }
+  .controls, .beaker-panel { width: 40%; background: #ffffff; padding: 20px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); position: relative; }
+  #beaker { width: 200px; height: 300px; margin: 10px auto; position: relative; background: radial-gradient(circle at 50% 20%, #ffffff 0%, #e0e0e0 60%, #bdbdbd 100%); border-radius: 100px / 40px; border: 3px solid #333; box-shadow: inset 0 0 20px rgba(0,0,0,0.25), 0 10px 25px rgba(0,0,0,0.25); overflow: hidden; }
+  #liquid { width: 100%; height: 0%; background: #6ab7ff; position: absolute; bottom: 0; border-radius: 0 0 10px 10px; transition: height 360ms ease, background 200ms ease; }
+  #pouring-stream { position: absolute; top: -120px; left: 50%; width: 6px; height: 0; background: rgba(100,150,255,0.9); border-radius: 3px; transform: translateX(-50%); pointer-events: none; transition: height 220ms ease; }
+  #pourBottle { position: absolute; top: -140px; left: 50%; width: 90px; height: 120px; transform: translateX(-50%) rotate(0deg); background-size: contain; background-repeat: no-repeat; opacity: 0; transition: transform 320ms ease, opacity 320ms ease; pointer-events: none; }
+  .pouring #pouring-stream { height: 120px; }
+  .pouring #pourBottle { opacity: 1; transform: translateX(-50%) rotate(-40deg); }
+  button { padding: 10px; width: 100%; border: none; border-radius: 8px; background: #007bff; color: white; margin: 6px 0; cursor: pointer; }
+  button:hover { background: #005fcc; }
+  input, select { width: 100%; padding: 8px; margin: 5px 0; border-radius: 6px; border: 1px solid #aaa; }
+  .info { background: #eef; padding: 12px; border-radius: 8px; margin-top: 10px; }
+  canvas { width: 100%; background: #ffffff; border-radius: 8px; margin-top: 12px; }
+</style>
+</head>
+<body>
+<h2>Praktikum Asam Basa Virtual</h2>
+<div class="container">
+  <div class="controls">
+    <h3>Kontrol Praktikum</h3>
+    <label>Penambahan Volume (mL):</label>
+    <input type="number" id="addVol" value="5" min="1" max="50" />
+    <h4>Pilih Reagen</h4>
+    <button data-action="addHCl">HCl (Asam kuat)</button>
+    <button data-action="addNaOH">NaOH (Basa kuat)</button>
+    <button data-action="addCH3COOH">CH₃COOH (Asam lemah)</button>
+    <button data-action="addNH3">NH₃ (Basa lemah)</button>
+    <button data-action="addWater">Air (Pengencer)</button>
+    <h4>Pilih Indikator</h4>
+    <select id="indikator">
+      <option value="universal">Universal</option>
+      <option value="phenolphtalein">Fenolftalein</option>
+      <option value="methylorange">Metil Jingga</option>
+      <option value="bromtimol">Bromtimol Biru</option>
+    </select>
+    <button id="addIndicatorBtn">Tambahkan Indikator</button>
+    <button id="resetBtn" style="background:#ef4444">Reset Praktikum</button>
+  </div>
+
+  <div class="beaker-panel">
+    <h3>Bejana Larutan (kanan)</h3>
+    <div id="beaker">
+      <div id="pourBottle"></div>
+      <div id="pouring-stream"></div>
+      <div id="liquid"></div>
+    </div>
+    <div class="info">
+      <p><b>Volume:</b> <span id="vol">0</span> mL</p>
+      <p><b>pH Setelah Indikator:</b> <span id="ph">—</span></p>
+      <p><b>Warna:</b> <span id="warna">Biru muda (tanpa indikator)</span></p>
+    </div>
+    <canvas id="phChart" width="400" height="220"></canvas>
+  </div>
+</div>
+
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+
+document.addEventListener('DOMContentLoaded', function () {
+  
+  const addVolEl = document.getElementById('addVol');
+  const indikatorEl = document.getElementById('indikator');
+  const addIndicatorBtn = document.getElementById('addIndicatorBtn');
+  const resetBtn = document.getElementById('resetBtn');
+  const volEl = document.getElementById('vol');
+  const phEl = document.getElementById('ph');
+  const warnaEl = document.getElementById('warna');
+  const liqEl = document.getElementById('liquid');
+  const beakerEl = document.getElementById('beaker');
+  const pourStream = document.getElementById('pouring-stream');
+  const pourBottle = document.getElementById('pourBottle');
+
+  
+  let volume = 0; 
+  let phValue = 7; 
+  let indicatorAdded = false; 
+  const MAX_VOLUME_ML = 200; 
+  let labels = [];
+  let phData = [];
+
+  
+  const ctx = document.getElementById('phChart').getContext('2d');
+  const chart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: labels,
+      datasets: [{ label: 'pH Real Time', data: phData, borderColor: '#007bff', backgroundColor: 'rgba(0,123,255,0.08)', pointRadius: 4, tension: 0.2 }]
+    },
+    options: {
+      animation: false,
+      responsive: true,
+      scales: { x: { title: { display: true, text: 'Total Volume (mL)' } }, y: { min: 0, max: 14, title: { display: true, text: 'pH' } } }
+    }
+  });
+
+  
+  function getAdd() { return Number(addVolEl.value) || 5; }
+
+  function getColorIndicator(pH) {
+    if (!indicatorAdded) return '#6ab7ff';
+    const ind = indikatorEl.value;
+    if (ind === 'universal') {
+      if (pH < 7) return '#ff6b6b';
+      if (pH > 7) return '#85e085';
+      return '#6ab7ff';
+    }
+    if (ind === 'phenolphtalein') return pH > 8.3 ? '#ff66cc' : '#ffffff';
+    if (ind === 'methylorange') return pH < 3.1 ? '#ff3300' : '#ffcc66';
+    if (ind === 'bromtimol') {
+      if (pH < 6) return '#ffff00';
+      if (pH > 7.6) return '#0047ab';
+      return '#00ffcc';
+    }
+    return '#6ab7ff';
+  }
+
+  function updateUIAndChart() {
+    volEl.textContent = volume.toFixed(1);
+    phEl.textContent = indicatorAdded ? phValue.toFixed(2) : '—';
+    const pct = Math.min(100, (volume / MAX_VOLUME_ML) * 100);
+    liqEl.style.height = pct + '%';
+    const color = getColorIndicator(phValue);
+    liqEl.style.background = color;
+    warnaEl.textContent = indicatorAdded ? color : 'Biru muda (tanpa indikator)';
+
+    if (indicatorAdded) {
+      labels.push(volume.toFixed(1));
+      phData.push(phValue);
+      if (labels.length > 80) { labels.shift(); phData.shift(); }
+      chart.data.labels = labels.slice();
+      chart.data.datasets[0].data = phData.slice();
+      chart.data.datasets[0].borderColor = phValue < 7 ? 'red' : (phValue > 7 ? 'green' : 'blue');
+      chart.update();
+    }
+  }
+
+  
+  function showPourAnimation(color) {
+    
+    pourStream.style.background = color || 'rgba(100,150,255,0.9)';
+    pourBottle.style.filter = `drop-shadow(0 0 6px ${color || '#888'})`;
+
+    beakerEl.classList.add('pouring');
+    setTimeout(() => {
+      beakerEl.classList.remove('pouring');
+    }, 420);
+  }
+
+  
+  function addHCl() { showPourAnimation('#ff6666'); volume += getAdd(); phValue -= 0.4; if (phValue < 0.1) phValue = 0.1; updateUIAndChart(); }
+  function addNaOH() { showPourAnimation('#66bfff'); volume += getAdd(); phValue += 0.4; if (phValue > 14) phValue = 14; updateUIAndChart(); }
+  function addCH3COOH() { showPourAnimation('#ff9d66'); volume += getAdd(); phValue -= 0.15; if (phValue < 2.2) phValue = 2.2; updateUIAndChart(); }
+  function addNH3() { showPourAnimation('#bfefff'); volume += getAdd(); phValue += 0.15; if (phValue > 11.5) phValue = 11.5; updateUIAndChart(); }
+  function addWater() { showPourAnimation('#cfe0ff'); volume += getAdd(); phValue += (7 - phValue) * 0.1; updateUIAndChart(); }
+
+  
+  document.querySelectorAll('button[data-action]').forEach(btn => {
+    const act = btn.dataset.action;
+    btn.addEventListener('click', function () {
+      if (act === 'addHCl') addHCl();
+      if (act === 'addNaOH') addNaOH();
+      if (act === 'addCH3COOH') addCH3COOH();
+      if (act === 'addNH3') addNH3();
+      if (act === 'addWater') addWater();
+    });
+  });
+
+  
+  addIndicatorBtn.addEventListener('click', function () {
+    indicatorAdded = true;
+    labels.length = 0; phData.length = 0; chart.data.labels = labels; chart.data.datasets[0].data = phData; chart.update();
+    updateUIAndChart();
+  });
+
+  
+  resetBtn.addEventListener('click', function () {
+    volume = 0; phValue = 7; indicatorAdded = false; labels.length = 0; phData.length = 0; chart.data.labels = labels; chart.data.datasets[0].data = phData; chart.update(); updateUIAndChart();
+  });
+
+  
+  updateUIAndChart();
+});
+</script>
+</body>
+</html>
